@@ -206,8 +206,8 @@ def add_circle_with_number(slide, x, y, d, number, circle_rgb, number_rgb, font_
 
 def add_page_number(slide, n, total, rgb):
     add_textbox(
-        slide, SLIDE_W - Inches(1.0), SLIDE_H - Inches(0.55), Inches(0.7), Inches(0.4),
-        f"{n:02d} / {total:02d}", 10, rgb, align=PP_ALIGN.RIGHT, font="Calibri"
+        slide, SLIDE_W - Inches(0.8), SLIDE_H - Inches(0.55), Inches(0.5), Inches(0.4),
+        f"{n}", 12, rgb, align=PP_ALIGN.RIGHT, font="Calibri"
     )
 
 # ============================================================
