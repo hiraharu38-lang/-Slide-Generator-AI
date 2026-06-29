@@ -142,17 +142,67 @@ def add_bullets(slide, x, y, w, h, bullets, size, color, accent_rgb, font="Calib
         p.level = 0
     return box
 
-def add_picture_safe(slide, image_name, x, y, w=None, h=None):
+def add_picture_safe(slide, image_name, box_x, box_y, box_w, box_h):
+    """指定したbox内に収まるよう縦横比を保ったまま画像を配置する（はみ出し・重なり防止）"""
     if not image_name or image_name == "none":
         return False
     path = os.path.join(IMAGE_DIR, f"{image_name}.png")
-    if os.path.exists(path):
-        if w:
-            slide.shapes.add_picture(path, x, y, width=w)
-        elif h:
-            slide.shapes.add_picture(path, x, y, height=h)
-        return True
-    return False
+    if not os.path.exists(path):
+        return False
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            iw, ih = im.size
+    except Exception:
+        iw, ih = 1, 1
+
+    img_aspect = iw / ih
+    box_aspect = box_w / box_h
+
+    if img_aspect > box_aspect:
+        w = box_w
+        h = int(w / img_aspect)
+    else:
+        h = box_h
+        w = int(h * img_aspect)
+
+    x = box_x + int((box_w - w) / 2)
+    y = box_y + int((box_h - h) / 2)
+    slide.shapes.add_picture(path, x, y, width=w, height=h)
+    return True
+
+
+def fit_title_size(text, base_size, soft_limit, min_size, step=4):
+    """長い文字列の場合にフォントサイズを段階的に縮める"""
+    if not text:
+        return base_size
+    size = base_size
+    length = len(text)
+    while length > soft_limit and size > min_size:
+        size -= step
+        soft_limit += 6
+    return size
+
+
+def add_circle_with_number(slide, x, y, d, number, circle_rgb, number_rgb, font_size=24):
+    """円と数字を完全に同じ矩形・中央揃えで配置（位置ズレ防止）"""
+    add_circle(slide, x, y, d, circle_rgb)
+    box = slide.shapes.add_textbox(x, y, d, d)
+    tf = box.text_frame
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.margin_left = 0
+    tf.margin_right = 0
+    tf.margin_top = 0
+    tf.margin_bottom = 0
+    tf.word_wrap = False
+    p = tf.paragraphs[0]
+    p.text = str(number)
+    p.alignment = PP_ALIGN.CENTER
+    p.font.size = Pt(font_size)
+    p.font.bold = True
+    p.font.color.rgb = number_rgb
+    p.font.name = "Calibri"
+    return box
 
 def add_page_number(slide, n, total, rgb):
     add_textbox(
@@ -175,15 +225,17 @@ def layout_title(prs, data, palette, idx, total):
     add_circle(slide, SLIDE_W - Inches(3.5), Inches(-2.0), Inches(5.5), secondary)
     add_circle(slide, Inches(-1.5), SLIDE_H - Inches(1.8), Inches(3.2), secondary)
 
+    title_text = data.get("title", "Untitled")
+    title_size = fit_title_size(title_text, base_size=44, soft_limit=14, min_size=28)
     add_textbox(
-        slide, Inches(1.0), Inches(2.7), Inches(11.3), Inches(2.0),
-        data.get("title", "Untitled"), 44, accent, bold=True,
+        slide, Inches(1.0), Inches(2.5), Inches(11.3), Inches(2.2),
+        title_text, title_size, accent, bold=True,
         font="Cambria", line_spacing=1.1
     )
     subtitle = data.get("bullets", [])
     if subtitle:
         add_textbox(
-            slide, Inches(1.0), Inches(4.6), Inches(10.0), Inches(0.8),
+            slide, Inches(1.0), Inches(4.9), Inches(10.0), Inches(0.8),
             subtitle[0], 18, accent, italic=True, font="Calibri"
         )
     add_page_number(slide, idx, total, accent)
@@ -203,11 +255,13 @@ def layout_chapter(prs, data, palette, idx, total):
 
     chapter_no = data.get("chapter_no", "")
     if chapter_no:
-        add_textbox(slide, Inches(1.0), Inches(2.4), Inches(3.0), Inches(1.0),
+        add_textbox(slide, Inches(1.0), Inches(2.3), Inches(3.0), Inches(1.0),
                     f"{chapter_no}", 64, secondary, bold=True, font="Cambria")
+    title_text = data.get("title", "")
+    title_size = fit_title_size(title_text, base_size=38, soft_limit=14, min_size=26)
     add_textbox(
-        slide, Inches(1.0), Inches(3.4), Inches(10.5), Inches(1.8),
-        data.get("title", ""), 38, accent, bold=True, font="Cambria"
+        slide, Inches(1.0), Inches(3.4), Inches(10.8), Inches(2.0),
+        title_text, title_size, accent, bold=True, font="Cambria", line_spacing=1.15
     )
     add_page_number(slide, idx, total, accent)
     return slide
@@ -227,20 +281,28 @@ def layout_content_split(prs, data, palette, idx, total):
     # 右側のカラーパネル（画像が無くても色面として機能する）
     add_rect(slide, Inches(8.6), 0, SLIDE_W - Inches(8.6), SLIDE_H, primary)
 
+    title_text = data.get("title", "")
+    title_size = fit_title_size(title_text, base_size=32, soft_limit=16, min_size=22)
     add_textbox(
         slide, Inches(0.7), Inches(0.55), Inches(7.4), Inches(1.0),
-        data.get("title", ""), 32, text_dark, bold=True, font="Cambria"
+        title_text, title_size, text_dark, bold=True, font="Cambria"
     )
-    bullets = data.get("bullets", [])
-    y = Inches(1.7)
-    for b in bullets:
-        add_circle(slide, Inches(0.7), y + Inches(0.07), Inches(0.14), hex_to_rgb(palette["accent"]) if palette["accent"] != "FFFFFF" else primary)
-        add_textbox(slide, Inches(1.05), y, Inches(7.0), Inches(0.9), b, 16, text_dark, font="Calibri", line_spacing=1.15)
-        y += Inches(0.95)
+    bullets = data.get("bullets", []) or []
+    n = max(len(bullets), 1)
+    area_top, area_bottom = Inches(1.8), Inches(7.0)
+    slot_h = (area_bottom - area_top) / n
+    bullet_color = hex_to_rgb(palette["text_on_light"])
+    for i, b in enumerate(bullets):
+        y = area_top + slot_h * i
+        add_circle(slide, Inches(0.7), y + Inches(0.06), Inches(0.16), primary)
+        add_textbox(slide, Inches(1.1), y, Inches(6.9), slot_h - Inches(0.1), b, 18, bullet_color,
+                    font="Calibri", line_spacing=1.2, anchor=MSO_ANCHOR.TOP)
 
-    has_img = add_picture_safe(slide, data.get("image_name"), Inches(9.0), Inches(2.2), w=Inches(3.8))
+    # 画像は右パネル内の専用エリアに限定して配置（テキストとは重ならない）
+    img_box = (Inches(9.0), Inches(2.0), Inches(3.4), Inches(4.6))
+    has_img = add_picture_safe(slide, data.get("image_name"), *img_box)
     if not has_img:
-        add_circle(slide, Inches(10.2), Inches(3.0), Inches(1.7), secondary)
+        add_circle(slide, Inches(10.2), Inches(3.5), Inches(1.7), secondary)
 
     add_page_number(slide, idx, total, text_dark)
     return slide
@@ -256,21 +318,29 @@ def layout_content_icons(prs, data, palette, idx, total):
 
     set_background(slide, hex_to_rgb("FFFFFF"))
 
+    title_text = data.get("title", "")
+    title_size = fit_title_size(title_text, base_size=32, soft_limit=18, min_size=24)
     add_textbox(slide, Inches(0.8), Inches(0.55), Inches(11.5), Inches(1.0),
-                data.get("title", ""), 32, text_dark, bold=True, font="Cambria")
+                title_text, title_size, text_dark, bold=True, font="Cambria")
 
-    bullets = data.get("bullets", [])
+    bullets = data.get("bullets", []) or []
     n = max(len(bullets), 1)
-    col_w = (SLIDE_W - Inches(1.6)) / n
-    for i, b in enumerate(bullets):
-        x = Inches(0.8) + col_w * i
-        add_circle(slide, x, Inches(2.0), Inches(0.7), primary)
-        add_textbox(slide, x, Inches(2.05), Inches(0.7), Inches(0.6), str(i + 1), 24, hex_to_rgb("FFFFFF"),
-                    bold=True, align=PP_ALIGN.CENTER, font="Calibri")
-        add_textbox(slide, x, Inches(3.0), col_w - Inches(0.4), Inches(2.8), b, 15, text_dark,
-                    font="Calibri", line_spacing=1.2)
+    margin = Inches(0.8)
+    gap = Inches(0.3)
+    col_w = (SLIDE_W - margin * 2 - gap * (n - 1)) / n if n > 0 else SLIDE_W - margin * 2
+    circle_d = Inches(0.7)
 
-    add_picture_safe(slide, data.get("image_name"), Inches(0.8), Inches(5.6), w=Inches(2.2))
+    for i, b in enumerate(bullets):
+        x = margin + (col_w + gap) * i
+        circle_x = x + (col_w - circle_d) / 2
+        add_circle_with_number(slide, circle_x, Inches(2.0), circle_d, i + 1, primary,
+                                hex_to_rgb("FFFFFF"), font_size=22)
+        add_textbox(slide, x, Inches(3.0), col_w, Inches(2.3), b, 17, text_dark,
+                    font="Calibri", line_spacing=1.2, anchor=MSO_ANCHOR.TOP)
+
+    # 画像専用エリア（本文テキストとは重ならない下段に固定）
+    img_box = (Inches(0.8), Inches(5.55), Inches(2.6), Inches(1.65))
+    add_picture_safe(slide, data.get("image_name"), *img_box)
     add_page_number(slide, idx, total, text_dark)
     return slide
 
@@ -287,10 +357,11 @@ def layout_stat(prs, data, palette, idx, total):
 
     stat = data.get("stat", data.get("title", ""))
     label = data.get("bullets", [""])[0] if data.get("bullets") else ""
+    stat_size = fit_title_size(stat, base_size=64, soft_limit=8, min_size=36, step=6)
 
-    add_textbox(slide, Inches(1.0), Inches(2.4), Inches(11.3), Inches(2.0),
-                stat, 64, secondary, bold=True, align=PP_ALIGN.CENTER, font="Cambria")
-    add_textbox(slide, Inches(1.5), Inches(4.5), Inches(10.3), Inches(1.0),
+    add_textbox(slide, Inches(1.0), Inches(2.2), Inches(11.3), Inches(2.0),
+                stat, stat_size, secondary, bold=True, align=PP_ALIGN.CENTER, font="Cambria")
+    add_textbox(slide, Inches(1.5), Inches(4.7), Inches(10.3), Inches(1.0),
                 label, 18, hex_to_rgb("FFFFFF"), align=PP_ALIGN.CENTER, italic=True, font="Calibri")
     add_page_number(slide, idx, total, hex_to_rgb("FFFFFF"))
     return slide
@@ -307,15 +378,17 @@ def layout_summary(prs, data, palette, idx, total):
     set_background(slide, primary)
     add_circle(slide, SLIDE_W - Inches(2.5), SLIDE_H - Inches(2.5), Inches(4.0), secondary)
 
+    title_text = data.get("title", "まとめ")
+    title_size = fit_title_size(title_text, base_size=34, soft_limit=16, min_size=26)
     add_textbox(slide, Inches(1.0), Inches(0.9), Inches(10.5), Inches(1.0),
-                data.get("title", "まとめ"), 34, accent, bold=True, font="Cambria")
+                title_text, title_size, accent, bold=True, font="Cambria")
 
-    bullets = data.get("bullets", [])
+    bullets = data.get("bullets", []) or []
     y = Inches(2.2)
     for b in bullets:
-        add_rect(slide, Inches(1.0), y, Inches(0.12), Inches(0.5), secondary)
-        add_textbox(slide, Inches(1.35), y, Inches(10.0), Inches(0.7), b, 18, accent, font="Calibri")
-        y += Inches(0.85)
+        add_rect(slide, Inches(1.0), y, Inches(0.12), Inches(0.55), secondary)
+        add_textbox(slide, Inches(1.35), y, Inches(10.0), Inches(0.9), b, 19, accent, font="Calibri", line_spacing=1.15)
+        y += Inches(1.0)
 
     add_page_number(slide, idx, total, accent)
     return slide
@@ -437,6 +510,15 @@ if st.button("スライドを生成する", type="primary"):
 - 内容の中に強調すべき数字・統計・キーフレーズがあれば layout: "stat" を1〜2枚挿入する。
 - 最後のスライドは必ず layout: "summary"。
 - 合計スライド数は{num_slides}枚に近づけること。
+
+【文章の質に関する厳格なルール】
+- title は12〜20文字程度。短すぎる単語だけや、長すぎる一文は禁止。
+- 本文スライド（content_split / content_icons）の bullets は1スライドにつき3つ、各20〜40文字程度の「具体的な事実・固有名詞・数字を含む完全な文」にすること。
+  - NG例（抽象的すぎる）：「魅力がある」「いろいろある」「素晴らしい体験」
+  - OK例（具体的）：「銀山温泉に代表される、大正ロマンの街並みが残る名湯」
+- 【内容】に書かれている情報から逸脱しない。情報が不足する場合は一般的な事実で補ってもよいが、無関係な内容や事実と異なる内容は書かないこと。
+- stat の値は8文字以内の短いフレーズ（例："95%"、"年間300万人"）。bulletsにその数字の説明を1点、30文字程度で書く。
+- summary の bullets は3〜4つ、各20〜30文字程度で、スライド全体の要点を要約すること（タイトルの単純な繰り返しは禁止）。
 
 ■ image_name に使えるキーワード一覧（内容に合うものを厳選、不要なら "none"）:
 {image_keywords}
